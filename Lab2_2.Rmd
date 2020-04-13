@@ -1,0 +1,214 @@
+## Упражнение 2
+
+Имеются данные по импорту сливочного масла в РФ. Необходимо построить графики плотности массы поставок (Netweight.kg.mean) по годам. 
+
+Цветом показать периоды с января по август и с сентября по декабрь каждого года. Необходимо построить один и тот же график средствами «base», «lattice» и «ggplot2» и сохранить в формат png.
+
+Нас интересует эффект от введения продовольственных санкций.
+
+## Обработка исходных данных
+
+#### Первые 6 строк исходной таблицы
+
+```{r, echo=FALSE, message=FALSE, null_prefix=TRUE, comment=NA, fig.height=15}
+
+library(data.table)
+library(lattice)
+library(ggplot2)
+library(knitr)
+
+# блокируем вывод цифр с показателями степеней
+options(scipen = 1000000)
+
+# загружаем файл с данными по импорту
+fileURL = 'https://raw.githubusercontent.com/aksyuk/R-data/master/COMTRADE/040510-Imp-RF-comtrade.csv'
+
+# создаём директорию для данных, если она ещё не существует
+if (!file.exists('./data')) {
+  invisible(capture.output( dir.create('./data') ))
+}
+
+# создаём файл с логом загрузок, если он ещё не существует
+if (!file.exists('./data/download.log')) {
+  invisible(capture.output( file.create('./data/download.log') ))
+}
+
+# загружаем файл, если он ещё не существует
+if (!file.exists('./data/040510-Imp-RF-comtrade.csv')) {
+  download.file(fileURL, './data/040510-Imp-RF-comtrade.csv')
+
+  # делаем запись в лог
+  write(paste('File "040510-Imp-RF-comtrade.csv" loaded', Sys.time()), file = './data/download.log', append = T)
+}
+
+# читаем данные из загруженного .csv-файла во фрейм, если он ещё не существует
+if (!exists('DT.import')) {
+  DT.import = data.table(read.csv('./data/040510-Imp-RF-comtrade.csv', stringsAsFactors = F))
+}
+
+# первые 6 записей из таблицы с данными
+kable(head(DT.import[,c(1:10)]), row.names = T)
+kable(head(DT.import[,c(11:17)]), row.names = T)
+
+```
+
+#### Количество пропущенных значений в столбце Netweight.kg
+
+```{r, echo=FALSE, message=FALSE, null_prefix=TRUE, comment=NA, fig.height=15}
+
+# сколько NA в столбце Netweight.kg
+sum(is.na(DT.import$Netweight.kg))
+
+```
+
+#### Вычислим среднее значение Netweight.kg по каждому году и создадим новую переменную Netweight.kg.mean в которой пропуски из колонки Netweight.kg будут заполнены средними значениями за год
+
+```{r, echo=FALSE, message=FALSE, null_prefix=TRUE, comment=NA, fig.height=15}
+
+# явное преобразование типа, чтобы избежать проблем при заполнении пропусков
+DT.import[, Netweight.kg := as.double(Netweight.kg)]
+ 
+# считаем среднее арифметическое и округляем до целого, как исходные данные
+mean_by_year = DT.import[, round(mean(.SD$Netweight.kg, na.rm = T), 0), by = Year]
+colnames(mean_by_year) = c("Year", "Netweight.kg.mean")
+mean_by_year
+
+# создаем переменную Netweight.kg.mean в которой заменяем пропуски на среднее по году
+DT.import[, Netweight.kg.mean := round(mean(.SD$Netweight.kg, na.rm = T), 0), by = Year]
+DT.import[!is.na(Netweight.kg), Netweight.kg.mean := Netweight.kg]
+
+```
+
+## Печатаем графики
+
+Ось Y на графиках ограничена значением 0.000085. При этом происходит обрезание верхней части графиков плотности для 2018 и 2019 годов. Данное значение для оси Y выбрано по причине того, что при больших значениях предела по Y, при которых графики плотности за 2018 и 2019 года отображаются полностью, графики за остальные года становятся фактически нечитабельными.
+
+#### Базовая графическая система
+
+```{r, echo=FALSE, message=FALSE, null_prefix=TRUE, comment=NA, fig.height=15}
+
+# определяем месяц (Month)
+DT.import$Month = as.numeric( substring(DT.import$Period, 5, 6) )
+
+# определяем периоды (Period.Month): январь-август и сентябрь-декабрь и преобразуем переменую в фактор
+DT.import$Period.Month[DT.import$Month <= 8] = "january-august"
+DT.import$Period.Month[DT.import$Month > 8] = "september-december"
+DT.import$Period.Month = as.factor(DT.import$Period.Month)
+
+# преобразуем Year в фактор
+DT.import$Year = as.factor(DT.import$Year)
+
+###
+
+# перечень лет
+years = unique(DT.import$Year)
+
+# минимальные и максимальные значения Netweight.kg.mean
+#maxnw = max(DT.import$Netweight.kg.mean)
+#minnw = min(DT.import$Netweight.kg.mean)
+
+# печать серии графиков
+plot_base = function() {
+
+  par(mfrow = c(5, 2))
+  for (year in years) {
+    # извлекаем данные за год
+    current_year = DT.import[DT.import$Year == year, ]
+    # извлекаем данные по периодам
+    jan_aug = current_year$Netweight.kg.mean[current_year$Period.Month == "january-august"]
+    sep_dec = current_year$Netweight.kg.mean[current_year$Period.Month == "september-december"]
+    # рассчитываем плотности
+    d1 = density(jan_aug)
+    d2 = density(sep_dec)
+    # печатаем график
+    plot(d1, main = year, xlim = c(-100000, 500000), ylim = c(0, 0.000085), xlab = "Netweight.kg.mean", ylab = 'Density', col = "blue")
+    lines(d2, col = "red")
+    grid()
+    legend("topright", title = "Periods", legend = c("january-august", "september-december"), col = c("blue", "red"), lty = 1)
+  }
+
+}
+
+# выводим график
+plot_base()
+
+# выводим график в файл
+png('Pic-01.png', width = 2000, height = 5000, res = 300)
+  plot_base()
+invisible(dev.off())
+
+```
+
+#### lattice
+
+```{r, echo=FALSE, message=FALSE, null_prefix=TRUE, comment=NA, fig.height=15}
+
+# изменяем порядок фактора Year
+old_year = DT.import$Year
+DT.import$Year = factor(DT.import$Year, levels = c(2018, 2019, 2016, 2017, 2014, 2015, 2012, 2013, 2010, 2011))
+
+# печать серии графиков
+plot_lattice =
+  densityplot(~ Netweight.kg.mean | Year, data = DT.import,
+  ylim = c(-0.000005, 0.000085), xlim = c(-100000, 500000), 
+  groups = Period.Month,
+  layout = c(2, 5),
+  type = c("l", "g"),
+  col = c("blue", "red"),
+  plot.points = FALSE,
+  key = list( space = "top", columns = 2, title = "Periods", cex.title = 1,
+    lines = list(col = c("blue", "red"), lty = c(1, 1)),
+    text = list(c("january-august", "september-december")) ),
+  main = 'Years',
+  xlab = 'Netweight.kg.mean', ylab = 'Density')
+
+# выводим график
+plot_lattice
+
+# выводим график в файл
+png('Pic-02.png', width = 2000, height = 5000, res = 300)
+  print(plot_lattice)
+invisible(dev.off())
+
+```
+
+#### ggplot2
+
+```{r, echo=FALSE, message=FALSE, null_prefix=TRUE, comment=NA, fig.height=15}
+
+# изменяем порядок фактора Year на исходный
+DT.import$Year = old_year
+
+# график плотности Netweight.kg.mean с разделением по периодам года (январь-август, сентябрь-декабрь)
+gp = ggplot(data = DT.import, aes(x = Netweight.kg.mean, color = Period.Month)) + geom_density()
+
+# переопределяем цвета
+gp = gp + scale_colour_manual(name = "Periods", values = c("blue", "red"))
+
+# добавляем подписи осей и заголовок
+gp = gp + xlab("Netweight.kg.mean")
+gp = gp + ylab("Density")
+gp = gp + ggtitle("Years")
+
+# располагаем легенду внизу
+gp = gp + theme(legend.position = "bottom")
+
+# задаем значения по оси x и поворачиваем их на 45 градусов
+gp = gp + scale_x_continuous(name = "Netweight.kg.mean", breaks = seq(-100000, 500000, 100000), labels = seq(-100000, 500000, 100000), limits = c(-100000, 500000))
+gp = gp + theme(axis.text.x = element_text(angle = 45, hjust = 1))
+
+# пределы по оси y
+gp = gp + coord_cartesian(ylim = c(0, 0.000085))
+
+# добавляем фасетки для разных лет
+gp = gp + facet_wrap(~ Year, ncol = 2)
+
+# выводим график
+gp
+
+# выводим график в файл
+png('Pic-03.png', width = 2000, height = 5000, res = 300)
+  print(gp)
+invisible(dev.off())
+
+```
